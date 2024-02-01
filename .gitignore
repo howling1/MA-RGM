@@ -38,9 +38,12 @@ Thumbs.db
 
 *.ckpt
 *.wandb
+*.out
+*.err
 
-
+/output/
+/wandb/
+/vis_test/
 /__pycache__/
 /*/__pycache__/
 /data/dataset_*/
-

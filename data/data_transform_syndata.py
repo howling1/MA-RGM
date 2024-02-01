@@ -145,6 +145,8 @@ class RandomCrop:
 
     @staticmethod
     def crop(points, p_keep):
+        point_ids = np.arange(points.shape[0]).reshape([-1,1])
+        points = np.concatenate([points, point_ids], axis=1) # 添加点的index到points最后一位
         rand_xyz = uniform_2_sphere()
         centroid = np.mean(points[:, :3], axis=0)
         points_centered = points[:, :3] - centroid
@@ -193,6 +195,8 @@ class RandomCropinv:
 
     @staticmethod
     def crop(points, p_keep):
+        point_ids = np.arange(points.shape[0]).reshape([-1,1])
+        points = np.concatenate([points, point_ids], axis=1) # 添加点的index到points最后一位
         rand_xyz = uniform_2_sphere()
         centroid = np.mean(points[:, :3], axis=0)
         points_centered = points[:, :3] - centroid
@@ -380,69 +384,11 @@ class ShufflePoints:
         if 'points' in sample:
             sample['points'] = np.random.permutation(sample['points'])
         else:
-            # sample['points_ref'] = np.random.permutation(sample['points_ref'])
-            # sample['points_src'] = np.random.permutation(sample['points_src'])
             refperm = np.random.permutation(sample['points_ref'].shape[0])
             srcperm = np.random.permutation(sample['points_src'].shape[0])
             sample['points_ref'] = sample['points_ref'][refperm, :]
             sample['points_src'] = sample['points_src'][srcperm, :]
-            # TODO 修改corpflag部分，写一个专门的新分支
-            if 'jitterflag' in sample or 'corpflag' in sample:
-                perm_mat = np.zeros((sample['points_src'].shape[0], sample['points_ref'].shape[0]))
-                inlier_src = np.zeros((sample['points_src'].shape[0], 1))
-                inlier_ref = np.zeros((sample['points_ref'].shape[0], 1))
-                points_src_transform = se3.transform(sample['transform_gt'], sample['points_src'][:, :3])
-                points_ref = sample['points_ref'][:, :3]
-
-                dist_s2et, indx_s2et = nearest_neighbor(points_src_transform, points_ref)
-                dist_t2es, indx_t2es = nearest_neighbor(points_ref, points_src_transform)
-                padtype = 3 #双边对应填充， 完全填充，双边对应填充+部分对应填充，
-                padth = 0.05
-                if padtype==1:
-                    for row_i in range(sample['points_src'].shape[0]):
-                        if indx_t2es[indx_s2et[row_i]]==row_i and dist_s2et[row_i]<padth:
-                            perm_mat[row_i, indx_s2et[row_i]] = 1
-                elif padtype==2:
-                    for row_i in range(sample['points_src'].shape[0]):
-                        if dist_s2et[row_i]<padth:
-                            perm_mat[row_i, indx_s2et[row_i]] = 1
-                    for col_i in range(sample['points_ref'].shape[0]):
-                        if dist_t2es[col_i]<padth:
-                            perm_mat[indx_t2es[col_i], col_i] = 1
-                elif padtype==3:
-                    for row_i in range(sample['points_src'].shape[0]):
-                        if indx_t2es[indx_s2et[row_i]]==row_i and dist_s2et[row_i]<padth:
-                            perm_mat[row_i, indx_s2et[row_i]] = 1
-                    for row_i in range(sample['points_src'].shape[0]):
-                        if np.sum(perm_mat[row_i, :])==0 \
-                                and np.sum(perm_mat[:, indx_s2et[row_i]])==0 \
-                                and dist_s2et[row_i]<padth:
-                            perm_mat[row_i, indx_s2et[row_i]] = 1
-                    for col_i in range(sample['points_ref'].shape[0]):
-                        if np.sum(perm_mat[:, col_i])==0 \
-                                and np.sum(perm_mat[indx_t2es[col_i], :])==0 \
-                                and dist_t2es[col_i]<padth:
-                            perm_mat[indx_t2es[col_i], col_i] = 1
-
-                    outlier_src_ind = np.where(np.sum(perm_mat, axis=1)==0)[0]
-                    outlier_ref_ind = np.where(np.sum(perm_mat, axis=0)==0)[0]
-                    points_src_transform_rest = points_src_transform[outlier_src_ind]
-                    points_ref_rest = points_ref[outlier_ref_ind]
-                    if points_src_transform_rest.shape[0]>0 and points_ref_rest.shape[0]>0:
-                        dist_s2et, indx_s2et = nearest_neighbor(points_src_transform_rest, points_ref_rest)
-                        dist_t2es, indx_t2es = nearest_neighbor(points_ref_rest, points_src_transform_rest)
-                        for row_i in range(points_src_transform_rest.shape[0]):
-                            if indx_t2es[indx_s2et[row_i]]==row_i and dist_s2et[row_i]<padth*2:
-                                perm_mat[outlier_src_ind[row_i], outlier_ref_ind[indx_s2et[row_i]]] = 1
-                inlier_src_ind = np.where(np.sum(perm_mat, axis=1))[0]
-                inlier_ref_ind = np.where(np.sum(perm_mat, axis=0))[0]
-                inlier_src[inlier_src_ind] = 1
-                inlier_ref[inlier_ref_ind] = 1
-                sample['perm_mat'] = perm_mat
-                # ground truth correspondence中有对应的点为inlier，无对应的是outlier
-                sample['src_inlier'] = inlier_src
-                sample['ref_inlier'] = inlier_ref
-            else:
+            if 'corpflag' not in sample:
                 perm_mat = np.zeros((sample['points_src'].shape[0], sample['points_ref'].shape[0]))
                 srcpermsort = np.argsort(srcperm)
                 refpermsort = np.argsort(refperm)
@@ -452,6 +398,94 @@ class ShufflePoints:
                 sample['perm_mat'] = perm_mat # correspondence matrix
                 sample['src_inlier'] = np.ones((sample['points_src'].shape[0], 1))
                 sample['ref_inlier'] = np.ones((sample['points_ref'].shape[0], 1))
+
+            else:
+                perm_mat = np.zeros((sample['points_src'].shape[0], sample['points_ref'].shape[0]))
+                inlier_src = np.zeros((sample['points_src'].shape[0], 1))
+                inlier_ref = np.zeros((sample['points_ref'].shape[0], 1))
+                refpoint_id = sample['points_ref'][:, -1].reshape([-1]).astype(np.int32).tolist()
+                srcpoint_id = sample['points_src'][:, -1].reshape([-1]).astype(np.int32).tolist()
+                sample['points_src'] = sample['points_src'][:, :3]
+                sample['points_ref'] = sample['points_ref'][:, :3]
+
+                for i in range(len(srcpoint_id)):
+                    for j in range(len(refpoint_id)):
+                        if srcpoint_id[i] == refpoint_id[j]:
+                            perm_mat[i, j] = 1
+
+                sample['perm_mat'] = perm_mat # correspondence matrix
+                inlier_src_ind = np.where(np.sum(perm_mat, axis=1))[0]
+                inlier_ref_ind = np.where(np.sum(perm_mat, axis=0))[0]
+                inlier_src[inlier_src_ind] = 1
+                inlier_ref[inlier_ref_ind] = 1
+                sample['src_inlier'] = inlier_src
+                sample['ref_inlier'] = inlier_ref
+                
+            # if 'jitterflag' in sample or 'corpflag' in sample:
+            #     perm_mat = np.zeros((sample['points_src'].shape[0], sample['points_ref'].shape[0]))
+            #     inlier_src = np.zeros((sample['points_src'].shape[0], 1))
+            #     inlier_ref = np.zeros((sample['points_ref'].shape[0], 1))
+            #     points_src_transform = se3.transform(sample['transform_gt'], sample['points_src'][:, :3])
+            #     points_ref = sample['points_ref'][:, :3]
+
+            #     dist_s2et, indx_s2et = nearest_neighbor(points_src_transform, points_ref)
+            #     dist_t2es, indx_t2es = nearest_neighbor(points_ref, points_src_transform)
+            #     padtype = 3 #双边对应填充， 完全填充，双边对应填充+部分对应填充，
+            #     padth = 0.05
+            #     if padtype==1:
+            #         for row_i in range(sample['points_src'].shape[0]):
+            #             if indx_t2es[indx_s2et[row_i]]==row_i and dist_s2et[row_i]<padth:
+            #                 perm_mat[row_i, indx_s2et[row_i]] = 1
+            #     elif padtype==2:
+            #         for row_i in range(sample['points_src'].shape[0]):
+            #             if dist_s2et[row_i]<padth:
+            #                 perm_mat[row_i, indx_s2et[row_i]] = 1
+            #         for col_i in range(sample['points_ref'].shape[0]):
+            #             if dist_t2es[col_i]<padth:
+            #                 perm_mat[indx_t2es[col_i], col_i] = 1
+            #     elif padtype==3:
+            #         for row_i in range(sample['points_src'].shape[0]):
+            #             if indx_t2es[indx_s2et[row_i]]==row_i and dist_s2et[row_i]<padth:
+            #                 perm_mat[row_i, indx_s2et[row_i]] = 1
+            #         for row_i in range(sample['points_src'].shape[0]):
+            #             if np.sum(perm_mat[row_i, :])==0 \
+            #                     and np.sum(perm_mat[:, indx_s2et[row_i]])==0 \
+            #                     and dist_s2et[row_i]<padth:
+            #                 perm_mat[row_i, indx_s2et[row_i]] = 1
+            #         for col_i in range(sample['points_ref'].shape[0]):
+            #             if np.sum(perm_mat[:, col_i])==0 \
+            #                     and np.sum(perm_mat[indx_t2es[col_i], :])==0 \
+            #                     and dist_t2es[col_i]<padth:
+            #                 perm_mat[indx_t2es[col_i], col_i] = 1
+
+            #         outlier_src_ind = np.where(np.sum(perm_mat, axis=1)==0)[0]
+            #         outlier_ref_ind = np.where(np.sum(perm_mat, axis=0)==0)[0]
+            #         points_src_transform_rest = points_src_transform[outlier_src_ind]
+            #         points_ref_rest = points_ref[outlier_ref_ind]
+            #         if points_src_transform_rest.shape[0]>0 and points_ref_rest.shape[0]>0:
+            #             dist_s2et, indx_s2et = nearest_neighbor(points_src_transform_rest, points_ref_rest)
+            #             dist_t2es, indx_t2es = nearest_neighbor(points_ref_rest, points_src_transform_rest)
+            #             for row_i in range(points_src_transform_rest.shape[0]):
+            #                 if indx_t2es[indx_s2et[row_i]]==row_i and dist_s2et[row_i]<padth*2:
+            #                     perm_mat[outlier_src_ind[row_i], outlier_ref_ind[indx_s2et[row_i]]] = 1
+            #     inlier_src_ind = np.where(np.sum(perm_mat, axis=1))[0]
+            #     inlier_ref_ind = np.where(np.sum(perm_mat, axis=0))[0]
+            #     inlier_src[inlier_src_ind] = 1
+            #     inlier_ref[inlier_ref_ind] = 1
+            #     sample['perm_mat'] = perm_mat
+            #     # ground truth correspondence中有对应的点为inlier，无对应的是outlier
+            #     sample['src_inlier'] = inlier_src
+            #     sample['ref_inlier'] = inlier_ref
+            # else:
+            #     perm_mat = np.zeros((sample['points_src'].shape[0], sample['points_ref'].shape[0]))
+            #     srcpermsort = np.argsort(srcperm)
+            #     refpermsort = np.argsort(refperm)
+            #     for i,j in zip(srcpermsort,refpermsort):
+            #         perm_mat[i, j] = 1
+
+            #     sample['perm_mat'] = perm_mat # correspondence matrix
+            #     sample['src_inlier'] = np.ones((sample['points_src'].shape[0], 1))
+            #     sample['ref_inlier'] = np.ones((sample['points_ref'].shape[0], 1))
 
         return sample
 

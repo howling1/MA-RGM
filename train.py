@@ -3,6 +3,7 @@ import torch
 import torch.optim as optim
 import time
 import numpy as np
+import wandb
 from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
@@ -16,7 +17,6 @@ from utils.visdomshow import VisdomViz
 from utils.config import cfg
 # from parallel import DataParallel
 from eval import eval_model
-
 
 
 def train_eval_model(model,
@@ -111,7 +111,8 @@ def train_eval_model(model,
                 for k in match_metrics:
                     all_train_metrics_np[k].append(match_metrics[k])
                 for k in perform_metrics:
-                    all_train_metrics_np[k].append(perform_metrics[k])
+                    if k != 'pcd_comparison':
+                        all_train_metrics_np[k].append(perform_metrics[k])
                 all_train_metrics_np['loss'].append(np.repeat(loss.item(), 4))
 
                 if iter_num % cfg.STATISTIC_STEP == 0:
@@ -129,6 +130,7 @@ def train_eval_model(model,
         print('Epoch {:<4} Mean-Loss: {:.4f} GT-Acc:{:.4f} Pred-Acc:{:.4f}'.
               format(epoch, train_metrics['loss'], train_metrics['acc_gt'], train_metrics['acc_pred']) )
         print_metrics(train_metrics)
+        wandb.log({"train loss": train_metrics['loss']})
 
         save_model(model, str(checkpoint_path / 'params_{:04}.pt'.format(epoch + 1)))
         torch.save(optimizer.state_dict(), str(checkpoint_path / 'optim_{:04}.pt'.format(epoch + 1)))
@@ -137,6 +139,7 @@ def train_eval_model(model,
         val_metrics = eval_model(model, dataloader['val'])
         print('Mean-Loss: {:.4f} GT-Acc:{:.4f} Pred-Acc:{:.4f}'.format(val_metrics['loss'], val_metrics['acc_gt'], val_metrics['acc_pred']))
         print_metrics(val_metrics)
+        wandb.log({"val loss": val_metrics['loss']})
 
         if optimal_acc < val_metrics['acc_gt']:
             optimal_acc = val_metrics['acc_gt']
@@ -146,7 +149,7 @@ def train_eval_model(model,
             print('Current best rotation model is {}'.format(epoch + 1))
 
         # Test in each epochgi
-        # test_metrics = eval_model(model, dataloader['test'])
+        test_metrics = eval_model(model, dataloader['test'], vis=True)
 
         scheduler.step()
 
@@ -210,7 +213,7 @@ if __name__ == '__main__':
 
     dataloader = {x: get_dataloader(pc_dataset[x], shuffle=(x == 'train')) for x in ('train', 'val', 'test')}
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model = Net()
     # model = model.cuda()
@@ -227,6 +230,7 @@ if __name__ == '__main__':
     if not Path(cfg.OUTPUT_PATH).exists():
         Path(cfg.OUTPUT_PATH).mkdir(parents=True)
 
+    wandb.init(project = "MA-RGM", config = {})  
     now_time = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
 
     with DupStdoutFileManager(str(Path(cfg.OUTPUT_PATH) / ('train_log_' + now_time + '.log'))) as _:

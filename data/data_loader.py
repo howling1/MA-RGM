@@ -4,8 +4,8 @@
 
 import os
 import glob
-import h5py
 import torch
+import h5py
 import numpy as np
 from typing import List
 import torch.nn.functional as F
@@ -24,14 +24,14 @@ import open3d
 
 # Part of the code is referred from: https://github.com/charlesq34/pointnet
 
-def download():
-    DATA_DIR = os.path.dirname(os.path.abspath(__file__))
-    if not os.path.exists(os.path.join(DATA_DIR, 'dataset_modelnet40_2048')):
-        www = 'https://shapenet.cs.stanford.edu/media/modelnet40_ply_hdf5_2048.zip'
-        zipfile = os.path.basename(www)
-        os.system('wget %s; unzip %s' % (www+' --no-check-certificate', zipfile))
-        os.system('mv %s %s' % (zipfile[:-4], DATA_DIR))
-        os.system('rm %s' % (zipfile))
+# def download():
+#     DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+#     if not os.path.exists(os.path.join(DATA_DIR, 'dataset_modelnet40_2048')):
+#         www = 'https://shapenet.cs.stanford.edu/media/modelnet40_ply_hdf5_2048.zip'
+#         zipfile = os.path.basename(www)
+#         os.system('wget %s; unzip %s' % (www+' --no-check-certificate', zipfile))
+#         os.system('mv %s %s' % (zipfile[:-4], DATA_DIR))
+#         os.system('rm %s' % (zipfile))
 
 
 def load_data(partition):
@@ -40,9 +40,9 @@ def load_data(partition):
     all_data = []
     all_label = []
 
-    for h5_name in glob.glob(os.path.join(DATA_DIR, 'dataset_modelnet40_2048', 'ply_data_%s*.h5' % partition)):
+    for h5_name in glob.glob(os.path.join(DATA_DIR, 'dataset_modelnet40_ply_hdf5_2048', 'ply_data_%s*.h5' % partition)):
         f = h5py.File(h5_name, 'r')
-        data = np.concatenate([f['data'][:], f['normal'][:]], axis=-1)
+        data = f['data'][:]
         data = data.astype('float32')
         label = f['label'][:].astype('int64')
         f.close()
@@ -50,6 +50,7 @@ def load_data(partition):
         all_label.append(label)
     all_data = np.concatenate(all_data, axis=0)
     all_label = np.concatenate(all_label, axis=0)
+    
     return all_data, all_label
 
 def load_data_ribseg(partition):
@@ -98,7 +99,7 @@ def get_transforms(partition: str, num_points: int = 1024,
                           Transforms.ShufflePoints()]
         else:
             transforms = [Transforms.SetDeterministic(),
-                          Transforms.FixedResampler(num_points),
+                          Transforms.Resampler(num_points),
                           Transforms.SplitSourceRef(),
                           Transforms.RandomTransformSE3_euler(rot_mag=rot_mag, trans_mag=trans_mag),
                           Transforms.ShufflePoints()]
@@ -122,14 +123,13 @@ def get_transforms(partition: str, num_points: int = 1024,
                           Transforms.ShufflePoints()]
 
     elif noise_type == "crop":
-        # Both source and reference point clouds cropped, plus same noise in "jitter"
+        # Both source and reference point clouds cropped
         if partition == 'train':
             transforms = [Transforms.SetCorpFlag(),
                           Transforms.SplitSourceRef(),
                           Transforms.Resampler(num_points),
                           Transforms.RandomTransformSE3_euler(rot_mag=rot_mag, trans_mag=trans_mag),
                           Transforms.RandomCrop(partial_p_keep),
-                          Transforms.RandomJitter(),
                           Transforms.ShufflePoints()]
         else:
             transforms = [Transforms.SetCorpFlag(),
@@ -138,18 +138,16 @@ def get_transforms(partition: str, num_points: int = 1024,
                           Transforms.Resampler(num_points),
                           Transforms.RandomTransformSE3_euler(rot_mag=rot_mag, trans_mag=trans_mag),
                           Transforms.RandomCrop(partial_p_keep),
-                          Transforms.RandomJitter(),
                           Transforms.ShufflePoints()]
 
     elif noise_type == "cropinv":
-        # Both source and reference point clouds cropped, plus same noise in "jitter"
+        # Both source and reference point clouds cropped
         if partition == 'train':
             transforms = [Transforms.SetCorpFlag(),
                           Transforms.SplitSourceRef(),
                           Transforms.Resampler(num_points),
                           Transforms.RandomTransformSE3_euler(rot_mag=rot_mag, trans_mag=trans_mag),
                           Transforms.RandomCropinv(partial_p_keep),
-                          Transforms.RandomJitter(),
                           Transforms.ShufflePoints()]
         else:
             transforms = [Transforms.SetCorpFlag(),
@@ -158,6 +156,26 @@ def get_transforms(partition: str, num_points: int = 1024,
                           Transforms.Resampler(num_points),
                           Transforms.RandomTransformSE3_euler(rot_mag=rot_mag, trans_mag=trans_mag),
                           Transforms.RandomCropinv(partial_p_keep),
+                          Transforms.ShufflePoints()]
+    elif noise_type == "crop and jitter":
+        # Both source and reference point clouds cropped, plus same noise in "jitter"
+        if partition == 'train':
+            transforms = [Transforms.SetJitterFlag(),
+                          Transforms.SetCorpFlag(),
+                          Transforms.SplitSourceRef(),
+                          Transforms.Resampler(num_points),
+                          Transforms.RandomTransformSE3_euler(rot_mag=rot_mag, trans_mag=trans_mag),
+                          Transforms.RandomCrop(partial_p_keep),
+                          Transforms.RandomJitter(),
+                          Transforms.ShufflePoints()]
+        else:
+            transforms = [Transforms.SetJitterFlag(),
+                          Transforms.SetCorpFlag(),
+                          Transforms.SetDeterministic(),
+                          Transforms.SplitSourceRef(),
+                          Transforms.Resampler(num_points),
+                          Transforms.RandomTransformSE3_euler(rot_mag=rot_mag, trans_mag=trans_mag),
+                          Transforms.RandomCrop(partial_p_keep),
                           Transforms.RandomJitter(),
                           Transforms.ShufflePoints()]
     else:
@@ -271,16 +289,15 @@ class ModelNet40(Dataset):
         else:
             A2_gt, e2_gt = build_graphs(sample['points_ref'], sample['ref_inlier'], n2_gt, stg=cfg.PAIR.REF_GRAPH_CONSTRUCT)
 
-        if cfg.DATASET.NOISE_TYPE != 'clean': # 重新计算加入noise后的点云的normal并加入
-            src_o3 = open3d.geometry.PointCloud()
-            ref_o3 = open3d.geometry.PointCloud()
-            src_o3.points = open3d.utility.Vector3dVector(sample['points_src'][:, :3])
-            ref_o3.points = open3d.utility.Vector3dVector(sample['points_ref'][:, :3])
-            src_o3.estimate_normals(search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-            ref_o3.estimate_normals(search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
-            sample['points_src'][:, 3:6] = src_o3.normals
-            sample['points_ref'][:, 3:6] = ref_o3.normals
-
+        # 加入normal
+        src_o3 = open3d.geometry.PointCloud()
+        ref_o3 = open3d.geometry.PointCloud()
+        src_o3.points = open3d.utility.Vector3dVector(sample['points_src'][:, :3])
+        ref_o3.points = open3d.utility.Vector3dVector(sample['points_ref'][:, :3])
+        src_o3.estimate_normals(search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        ref_o3.estimate_normals(search_param=open3d.geometry.KDTreeSearchParamHybrid(radius=0.1, max_nn=30))
+        sample['points_src'] = np.concatenate([sample['points_src'], src_o3.normals], axis=1)
+        sample['points_ref'] = np.concatenate([sample['points_ref'], ref_o3.normals], axis=1)
 
         ret_dict = {'Ps': [torch.Tensor(x) for x in [sample['points_src'], sample['points_ref']]], 
                     'ns': [torch.tensor(x) for x in [n1_gt, n2_gt]], 

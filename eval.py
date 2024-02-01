@@ -2,7 +2,9 @@ import torch
 import time
 from datetime import datetime
 from pathlib import Path
+import open3d as o3d
 import numpy as np
+import os
 
 from data.data_loader import get_dataloader, get_datasets
 from utils.config import cfg
@@ -16,11 +18,14 @@ from collections import defaultdict
 
 
 def eval_model(model, dataloader, eval_epoch=None, metric_is_save=False, estimate_iters=1,
-               usepgm=True, userefine=False):
+               usepgm=True, userefine=False, vis=False):
     print('-----------------Start evaluation-----------------')
     lap_solver = hungarian
     permevalLoss = PermLoss()
     since = time.time()
+    all_P1_gt = []
+    all_P2_gt = []
+    all_P1_transformed = []
     all_val_metrics_np = defaultdict(list)
     iter_num = 0
 
@@ -93,7 +98,12 @@ def eval_model(model, dataloader, eval_epoch=None, metric_is_save=False, estimat
         for k in match_metrics:
             all_val_metrics_np[k].append(match_metrics[k])
         for k in perform_metrics:
-            all_val_metrics_np[k].append(perform_metrics[k])
+            if k != 'pcd_comparison':
+                all_val_metrics_np[k].append(perform_metrics[k])
+            else:
+                all_P1_gt.append(perform_metrics[k][0])
+                all_P2_gt.append(perform_metrics[k][1])
+                all_P1_transformed.append(perform_metrics[k][2])
         all_val_metrics_np['loss'].append(np.repeat(permevalloss.item(), batch_cur_size))
         all_val_metrics_np['infertime'].append(np.repeat(infer_time/batch_cur_size, batch_cur_size))
 
@@ -103,6 +113,27 @@ def eval_model(model, dataloader, eval_epoch=None, metric_is_save=False, estimat
             running_since = time.time()
 
     all_val_metrics_np = {k: np.concatenate(all_val_metrics_np[k]) for k in all_val_metrics_np}
+
+    # visualize point cloud to see the transformation effect
+    if vis:
+        all_P1_gt = np.concatenate(all_P1_gt)
+        all_P2_gt = np.concatenate(all_P2_gt)
+        all_P1_transformed = np.concatenate(all_P1_transformed)
+        sample_index = 0
+
+        vis_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vis_test")
+        if not os.path.exists(vis_dir):
+            os.makedirs(vis_dir)
+        P1_gt_o3d = o3d.geometry.PointCloud()
+        P2_gt_o3d = o3d.geometry.PointCloud()
+        P1_transformed_o3d = o3d.geometry.PointCloud()
+        P1_gt_o3d.points = o3d.utility.Vector3dVector(all_P1_gt[sample_index])
+        P2_gt_o3d.points = o3d.utility.Vector3dVector(all_P2_gt[sample_index])
+        P1_transformed_o3d.points = o3d.utility.Vector3dVector(all_P1_transformed[sample_index])
+        o3d.io.write_point_cloud(str(Path(vis_dir) / "src_pcd.ply"), P1_gt_o3d)
+        o3d.io.write_point_cloud(str(Path(vis_dir) / "target_pcd.ply"), P2_gt_o3d)
+        o3d.io.write_point_cloud(str(Path(vis_dir) / "src_pcd_transformed.ply"), P1_transformed_o3d)
+
     summary_metrics = summarize_metrics(all_val_metrics_np)
     # print('Mean-Loss: {:.4f} GT-Acc:{:.4f} Pred-Acc:{:.4f}'.format(summary_metrics['loss'], summary_metrics['acc_gt'], summary_metrics['acc_pred']))
     # print_metrics(summary_metrics)

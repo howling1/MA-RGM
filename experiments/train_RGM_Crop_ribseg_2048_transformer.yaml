@@ -4,12 +4,12 @@ DATASET:
   BATCH_SIZE: 4
   POINT_NUM: 1024
 #  UNSEEN: True
-  NOISE_TYPE: clean  #clean, jitter, crop
+  NOISE_TYPE: crop  #clean, jitter, crop, crop and jitter
   ROT_MAG: 45.0
   TRANS_MAG: 0.5
   PARTIAL_P_KEEP:
-    - 1.0
-    - 1.0
+    - 0.48 # source point cloud
+    - 1.0 # reference point cloud 
 
 # Pairwise data2d configuration
 PAIR:
@@ -53,7 +53,7 @@ GPUS:
 TRAIN:
   # start, end epochs
   START_EPOCH: 0
-  NUM_EPOCHS: 20
+  NUM_EPOCHS: 30
 
   LOSS_FUNC: perm
 

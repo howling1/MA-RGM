@@ -1,7 +1,7 @@
 # DCGNN model with ModelNet40 dataset
 
 DATASET:
-  BATCH_SIZE: 4
+  BATCH_SIZE: 16
   POINT_NUM: 1024
 #  UNSEEN: True
   NOISE_TYPE: clean  #clean, jitter, crop

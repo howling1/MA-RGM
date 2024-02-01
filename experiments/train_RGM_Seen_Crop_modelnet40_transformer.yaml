@@ -1,7 +1,7 @@
 # DCGNN model with ModelNet40 dataset
 
 DATASET:
-  BATCH_SIZE: 4
+  BATCH_SIZE: 16
   POINT_NUM: 1024
 #  UNSEEN: True
   NOISE_TYPE: crop  #clean, jitter, crop
@@ -49,12 +49,6 @@ RANDOM_SEED: 123
 GPUS:
   - 0
 #  - 1
-
-# Dispaly information
-VISDOM:
-#  OPEN: True
-  PORT: 8097
-  SERVER: http://localhost
 
 # Training settings
 TRAIN:

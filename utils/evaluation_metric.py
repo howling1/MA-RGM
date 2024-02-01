@@ -97,20 +97,34 @@ def matching_accuracy(pmat_pred, pmat_gt, ns):
             'pred_num':  np.array(pred_num_list)}
 
 
-def calcorrespondpc(pmat_pred, pc2_gt):
-    pc2 = torch.zeros_like(pc2_gt).to(pc2_gt)
-    pmat_pred_index = np.zeros((pc2_gt.shape[0], pc2_gt.shape[1]), dtype=int)
-    for i in range(pmat_pred.shape[0]):
-        pmat_predi_index1 = torch.where(pmat_pred[i])
-        pmat_predi_index00 = torch.where(torch.sum(pmat_pred[i], dim=0) == 0)[0]  #n row sum->1，1024
-        pmat_predi_index01 = torch.where(torch.sum(pmat_pred[i], dim=1) == 0)[0]  #n col sum->1024,1
-        pc2[i, torch.cat((pmat_predi_index1[0], pmat_predi_index01))] = \
-            pc2_gt[i, torch.cat((pmat_predi_index1[1], pmat_predi_index00))]
-        # pmat_pred_index[i] = torch.cat((pmat_predi_index1[1], pmat_predi_index00)).cpu().numpy()
-        pmat_pred_index[i, pmat_predi_index1[0].cpu().numpy()] = pmat_predi_index1[1].cpu().numpy()
-        pmat_pred_index[i, pmat_predi_index01.cpu().numpy()] = pmat_predi_index00.cpu().numpy()
-    return pc2, pmat_pred_index
+# def calcorrespondpc(pmat_pred, pc2_gt):
+#     pc2 = torch.zeros_like(pc2_gt).to(pc2_gt)
+#     pmat_pred_index = np.zeros((pc2_gt.shape[0], pc2_gt.shape[1]), dtype=int)
+#     for i in range(pmat_pred.shape[0]):
+#         pmat_predi_index1 = torch.where(pmat_pred[i]) # pmat_predi_index1[0]为src有对应ref的src index，pmat_predi_index1[1]为ref有对应src的ref index
+#         pmat_predi_index00 = torch.where(torch.sum(pmat_pred[i], dim=0) == 0)[0]  # 没有对应src 的ref的index
+#         pmat_predi_index01 = torch.where(torch.sum(pmat_pred[i], dim=1) == 0)[0]  # 没有对应ref 的src的index
+#         pc2[i, torch.cat((pmat_predi_index1[0], pmat_predi_index01))] = \
+#             pc2_gt[i, torch.cat((pmat_predi_index1[1], pmat_predi_index00))]
+#         # pmat_pred_index[i] = torch.cat((pmat_predi_index1[1], pmat_predi_index00)).cpu().numpy()
+#         pmat_pred_index[i, pmat_predi_index1[0].cpu().numpy()] = pmat_predi_index1[1].cpu().numpy()
+#         pmat_pred_index[i, pmat_predi_index01.cpu().numpy()] = pmat_predi_index00.cpu().numpy()
+#     return pc2, pmat_pred_index
 
+def calcorrespondpc(pmat_pred, pc1_gt, pc2_gt):
+    pc2 = torch.zeros_like(pc1_gt).to(pc1_gt)
+    for i in range(pmat_pred.shape[0]):
+        pmat_predi_index1 = torch.where(pmat_pred[i]) # pmat_predi_index1[0]为src有对应ref的src index，pmat_predi_index1[1]为ref有对应src的ref index
+
+        if pc1_gt.shape[1] == pc2_gt.shape[1]:
+            pmat_predi_index00 = torch.where(torch.sum(pmat_pred[i], dim=0) == 0)[0]  # 没有对应src 的ref的index
+            pmat_predi_index01 = torch.where(torch.sum(pmat_pred[i], dim=1) == 0)[0]  # 没有对应ref 的src的index
+            pc2[i, torch.cat((pmat_predi_index1[0], pmat_predi_index01))] = \
+                pc2_gt[i, torch.cat((pmat_predi_index1[1], pmat_predi_index00))]
+        else:
+            pc2[i, pmat_predi_index1[0]] = pc2_gt[i, pmat_predi_index1[1]]
+
+    return pc2
 
 def square_distance(src, dst):
         return torch.sum((src[:, :, None, :] - dst[:, None, :, :]) ** 2, dim=-1)
@@ -137,7 +151,8 @@ def refine_reg(initR, initt, src_gt, tgt_gt):
 
 def compute_transform(s_perm_mat, P1_gt, P2_gt, R_gt, T_gt, usepgm=True, userefine=False):
     if usepgm:
-        pre_P2_gt, _ = calcorrespondpc(s_perm_mat, P2_gt)
+        # pre_P2_gt, _ = calcorrespondpc(s_perm_mat, P2_gt)
+        pre_P2_gt = calcorrespondpc(s_perm_mat, P1_gt, P2_gt)
         R_pre, T_pre = SVDslover(P1_gt.clone(), pre_P2_gt, s_perm_mat)
     else:
         pre_P2_gt = P2_gt
@@ -193,7 +208,8 @@ def compute_metrics(s_perm_mat, P1_gt, P2_gt, R_gt, T_gt, device, usepgm=True, u
     clip_chamfer_dist = torch.mean(dist_src, dim=1) + torch.mean(dist_ref, dim=1)
 
     # correspondence distance
-    P2_gt_copy, _ = calcorrespondpc(s_perm_mat, P2_gt.detach())
+    # P2_gt_copy, _ = calcorrespondpc(s_perm_mat, P2_gt.detach())
+    P2_gt_copy = calcorrespondpc(s_perm_mat, P1_gt.detach(), P2_gt.detach())
     inlier_src = torch.sum(s_perm_mat, axis=-1)[:, :, None]
     # inlier_ref = torch.sum(s_perm_mat, axis=-2)[:, :, None]
     P1_gt_trans_corr = P1_gt_trans.mul(inlier_src)
@@ -212,7 +228,9 @@ def compute_metrics(s_perm_mat, P1_gt, P2_gt, R_gt, T_gt, device, usepgm=True, u
                'clip_chamfer_dist': to_numpy(clip_chamfer_dist),
                'pre_transform':np.concatenate((to_numpy(R_pre),to_numpy(T_pre)[:,:,None]),axis=2),
                'gt_transform':np.concatenate((to_numpy(R_gt),to_numpy(T_gt)[:,:,None]),axis=2),
-               'cpd_dis_nomean':to_numpy(correspond_dis)}
+               'cpd_dis_nomean':to_numpy(correspond_dis),
+               'pcd_comparison':(to_numpy(P1_gt), to_numpy(P2_gt), to_numpy(P1_transformed))
+               }
 
     return metrics
 

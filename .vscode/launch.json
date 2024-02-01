@@ -14,7 +14,7 @@
             "justMyCode": true,
             "cwd": "${workspaceFolder}",
             "args": [
-                "--cfg", "experiments/train_RGM_Clean_ribseg_2048_transformer.yaml"
+                "--cfg", "experiments/train_RGM_Seen_Clean_modelnet40_transformer.yaml"
             ]
         }
     ]
